@@ -481,6 +481,11 @@ export function createEngine(initialRows = 50, initialCols = 50) {
     const graph = createDependencyGraph()
     const dirtyCells = new Set()
     const computedCache = new Map()
+    const styles = new Map()
+    const columnWidths = new Map()
+    const rowHeights = new Map()
+    let frozenRows = 0
+    let rowIds = Array.from({ length: initialRows }, (_, index) => index)
     const undoStack = []
     const redoStack = []
 
@@ -499,6 +504,8 @@ export function createEngine(initialRows = 50, initialCols = 50) {
     function cellCoords(key) {
         return parseCellKey(key)
     }
+    function styleKey(row, col) { return `${row},${col}` }
+    function styleCoords(key) { const comma = key.match(/^(\d+),(\d+)$/); return comma ? { row: Number(comma[1]), col: Number(comma[2]) } : cellCoords(key) }
 
     function isValidCellKey(key) {
         const coords = cellCoords(key)
@@ -650,12 +657,12 @@ export function createEngine(initialRows = 50, initialCols = 50) {
             // Note: computed and error are not persisted in snapshots - they're recalculated on restore
             snapshot.set(key, { ...value })
         }
-        return snapshot
+        return { cells: snapshot, styles: new Map([...styles].map(([key, value]) => [key, { ...value }])), columnWidths: new Map(columnWidths), rowHeights: new Map(rowHeights), frozenRows, rowIds: [...rowIds] }
     }
 
     function restoreSnapshot(snapshot) {
         cells.clear()
-        for (const [key, value] of snapshot.entries()) {
+        for (const [key, value] of snapshot.cells.entries()) {
             cells.set(key, { ...value })
         }
         graph.clear()
@@ -668,7 +675,14 @@ export function createEngine(initialRows = 50, initialCols = 50) {
             if (value.raw && value.raw.startsWith('=')) updateDependencies(key, value.raw)
         }
         markAllCellsDirty()
+        styles.clear(); for (const [key, value] of snapshot.styles.entries()) styles.set(key, { ...value })
+        columnWidths.clear(); for (const [key, value] of snapshot.columnWidths.entries()) columnWidths.set(key, value)
+        rowHeights.clear(); for (const [key, value] of snapshot.rowHeights.entries()) rowHeights.set(key, value)
+        frozenRows = snapshot.frozenRows; rowIds = [...snapshot.rowIds]
     }
+
+    function shiftStyleRows(atIndex, delta, remove = false) { const next = new Map(); for (const [key, value] of styles) { const p = styleCoords(key); if (remove && p.row === atIndex) continue; next.set(styleKey(p.row >= atIndex ? p.row + delta : p.row, p.col), value) } styles.clear(); for (const entry of next) styles.set(...entry); const heights = new Map(); for (const [row, value] of rowHeights) { if (remove && row === atIndex) continue; heights.set(row >= atIndex ? row + delta : row, value) } rowHeights.clear(); for (const entry of heights) rowHeights.set(...entry) }
+    function shiftStyleColumns(atIndex, delta, remove = false) { const next = new Map(); for (const [key, value] of styles) { const p = styleCoords(key); if (remove && p.col === atIndex) continue; next.set(styleKey(p.row, p.col >= atIndex ? p.col + delta : p.col), value) } styles.clear(); for (const entry of next) styles.set(...entry); const widths = new Map(); for (const [col, value] of columnWidths) { if (remove && col === atIndex) continue; widths.set(col >= atIndex ? col + delta : col, value) } columnWidths.clear(); for (const entry of widths) columnWidths.set(...entry) }
 
     // ── Row / Column structural operations ──
 
@@ -680,7 +694,7 @@ export function createEngine(initialRows = 50, initialCols = 50) {
         dirtyCells.clear()
         _generation++
 
-        for (const [key, value] of snapshot.entries()) {
+        for (const [key, value] of snapshot.cells.entries()) {
             const coords = cellCoords(key)
             if (!coords) continue
             if (coords.row >= atIndex) {
@@ -691,6 +705,7 @@ export function createEngine(initialRows = 50, initialCols = 50) {
             }
         }
         rows++
+        rowIds.splice(atIndex, 0, Math.max(-1, ...rowIds) + 1); shiftStyleRows(atIndex, 1)
         for (const [key, value] of cells.entries()) {
             if (value.raw.startsWith('=')) updateDependencies(key, value.raw)
         }
@@ -705,7 +720,7 @@ export function createEngine(initialRows = 50, initialCols = 50) {
         dirtyCells.clear()
         _generation++
 
-        for (const [key, value] of snapshot.entries()) {
+        for (const [key, value] of snapshot.cells.entries()) {
             const coords = cellCoords(key)
             if (!coords) continue
             if (coords.row === atIndex) continue
@@ -717,6 +732,7 @@ export function createEngine(initialRows = 50, initialCols = 50) {
             }
         }
         rows--
+        rowIds.splice(atIndex, 1); shiftStyleRows(atIndex, -1, true)
         for (const [key, value] of cells.entries()) {
             if (value.raw.startsWith('=')) updateDependencies(key, value.raw)
         }
@@ -731,7 +747,7 @@ export function createEngine(initialRows = 50, initialCols = 50) {
         dirtyCells.clear()
         _generation++
 
-        for (const [key, value] of snapshot.entries()) {
+        for (const [key, value] of snapshot.cells.entries()) {
             const coords = cellCoords(key)
             if (!coords) continue
             if (coords.col >= atIndex) {
@@ -742,6 +758,7 @@ export function createEngine(initialRows = 50, initialCols = 50) {
             }
         }
         cols++
+        shiftStyleColumns(atIndex, 1)
         for (const [key, value] of cells.entries()) {
             if (value.raw.startsWith('=')) updateDependencies(key, value.raw)
         }
@@ -756,7 +773,7 @@ export function createEngine(initialRows = 50, initialCols = 50) {
         dirtyCells.clear()
         _generation++
 
-        for (const [key, value] of snapshot.entries()) {
+        for (const [key, value] of snapshot.cells.entries()) {
             const coords = cellCoords(key)
             if (!coords) continue
             if (coords.col === atIndex) continue
@@ -768,6 +785,7 @@ export function createEngine(initialRows = 50, initialCols = 50) {
             }
         }
         cols--
+        shiftStyleColumns(atIndex, -1, true)
         for (const [key, value] of cells.entries()) {
             if (value.raw.startsWith('=')) updateDependencies(key, value.raw)
         }
@@ -941,6 +959,7 @@ export function createEngine(initialRows = 50, initialCols = 50) {
                 else if (/\d+$/.test(first) && /\d+$/.test(second)) value = nextSeriesValue(first, r - top)
             }
             setCellRaw(r, c, value)
+            const sourceStyle = styles.get(styleKey(sr, sc)); if (sourceStyle) styles.set(styleKey(r, c), { ...sourceStyle })
         }
         _generation++; recalculate()
         pushToUndoStack({ type: 'bulk', snap: before, oldRows, oldCols })
@@ -964,6 +983,20 @@ export function createEngine(initialRows = 50, initialCols = 50) {
         _generation++; recalculate(); pushToUndoStack({ type: 'bulk', snap: before, oldRows, oldCols })
     }
 
+    function formatState() { return { styles: Object.fromEntries([...styles].map(([key, value]) => [key, { ...value }])), widths: Object.fromEntries(columnWidths), rowHeights: Object.fromEntries(rowHeights), freezeRows: frozenRows } }
+    function sameState(a, b) { return JSON.stringify(a) === JSON.stringify(b) }
+    function applyFormatState(next) {
+        const before = takeSnapshot(), current = formatState()
+        if (sameState(current, next)) return 'NO_CHANGES'
+        styles.clear(); for (const [key, value] of Object.entries(next.styles || {})) styles.set(key, { ...value })
+        columnWidths.clear(); for (const [key, value] of Object.entries(next.widths || {})) columnWidths.set(Number(key), value)
+        rowHeights.clear(); for (const [key, value] of Object.entries(next.rowHeights || {})) rowHeights.set(Number(key), value)
+        frozenRows = next.freezeRows || 0
+        pushToUndoStack({ type: 'bulk', snap: before, oldRows: rows, oldCols: cols })
+        return 'APPLIED'
+    }
+    function setCellStyle(row, col, patch) { const next = formatState(), key = styleKey(row, col); next.styles[key] = { ...(next.styles[key] || {}), ...patch }; return applyFormatState(next) }
+
     // ── Public API ──
     // The engine exposes a limited API to prevent direct access to internal state
     // All cell operations go through the public methods which handle undo/redo,
@@ -973,6 +1006,10 @@ export function createEngine(initialRows = 50, initialCols = 50) {
         get rows() { return rows },
         get cols() { return cols },
         getCell: getCellForDisplay,
+        getCellStyle: (row, col) => ({ ...(styles.get(styleKey(row, col)) || {}) }),
+        getFormatState: formatState,
+        applyFormatState,
+        setCellStyle,
         setCell: executeSetCell,
         fillRange: executeFill,
         clearRange: executeClearRange,
@@ -985,6 +1022,7 @@ export function createEngine(initialRows = 50, initialCols = 50) {
         redo,
         canUndo: () => undoStack.length > 0,
         canRedo: () => redoStack.length > 0,
+        undoDepth: () => undoStack.length,
         // Grow the grid so that at least minRows x minCols exist. The engine is
         // sparse, so this only moves the bounds; nothing is allocated.
         ensureCapacity: (minRows, minCols) => {

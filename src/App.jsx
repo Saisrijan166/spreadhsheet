@@ -21,14 +21,12 @@ export default function App() {
   const [editValue, setEditValue] = useState('')
   // Cell styles are stored separately from engine data
   // Format: { "row,col": { bold: bool, italic: bool, ... } }
-  const [cellStyles, setCellStyles] = useState({})
   const cellInputRef = useRef(null)
   const [aiOpen, setAiOpen] = useState(false)
   const [aiPrompt, setAiPrompt] = useState('')
   const [aiResult, setAiResult] = useState(null)
   const [aiError, setAiError] = useState('')
   const [showPlan, setShowPlan] = useState(true)
-  const [formatState, setFormatState] = useState({ styles: {}, widths: {}, freezeRows: 0 })
   const [filters, setFilters] = useState({})
   const [filterOpen, setFilterOpen] = useState(null)
   const [sortState, setSortState] = useState({})
@@ -70,28 +68,25 @@ export default function App() {
   const applyAiFormat = useCallback(() => {
     if (!aiResult?.action || aiResult.action.type !== 'format_sheet') return
     const matrix = Array.from({ length: engine.rows }, (_, r) => Array.from({ length: engine.cols }, (_, c) => engine.getCell(r, c).computed ?? ''))
-    const applied = applyFormat(matrix, formatState, aiResult.action)
-    if (applied.code === 'APPLIED') { setFormatState(applied.state); setCellStyles(applied.state.styles) }
+    const applied = applyFormat(matrix, engine.getFormatState(), aiResult.action)
+    if (applied.code === 'APPLIED') engine.applyFormatState(applied.state)
+    forceRerender()
     setAiResult(result => ({ ...result, result: { message: applied.code } }))
-  }, [aiResult, engine, formatState])
+  }, [aiResult, engine, forceRerender])
 
   // ────── Cell style helpers ──────
 
   const getCellStyle = useCallback((row, col) => {
-    const key = `${row},${col}`
-    return cellStyles[key] || {
+    return { 
       bold: false, italic: false, underline: false,
-      bg: 'white', color: '#202124', align: 'left', fontSize: 13
+      bg: 'white', color: '#202124', align: 'left', fontSize: 13,
+      ...engine.getCellStyle(row, col)
     }
-  }, [cellStyles])
+  }, [engine])
 
   const updateCellStyle = useCallback((row, col, updates) => {
-    const key = `${row},${col}`
-    setCellStyles(prev => ({
-      ...prev,
-      [key]: { ...getCellStyle(row, col), ...updates }
-    }))
-  }, [getCellStyle])
+    engine.setCellStyle(row, col, { ...getCellStyle(row, col), ...updates }); forceRerender()
+  }, [getCellStyle, engine, forceRerender])
 
   // ────── Cell editing ──────
 
@@ -122,7 +117,7 @@ export default function App() {
   const extendDrag = useCallback((row, col) => { if (dragMode === 'select') { setSelection(s => s && ({ ...s, r2: row, c2: col })); setSelectedCell({ r: row, c: col }) } }, [dragMode])
   useEffect(() => { const stop = () => setDragMode(null); window.addEventListener('mouseup', stop); return () => window.removeEventListener('mouseup', stop) }, [])
   const finishFill = useCallback((event) => { event.preventDefault(); event.stopPropagation(); if (!selection) return; setDragMode('fill') }, [selection])
-  const fillTo = useCallback((row, col) => { if (dragMode !== 'fill' || !selection) return; const target={ r1: selection.r1, c1: selection.c1, r2: row, c2: col }; engine.fillRange(selection, target); const seed=cellStyles[`${selection.r1},${selection.c1}`] || {}; setCellStyles(prev => { const next={...prev}; for(let r=Math.min(target.r1,target.r2);r<=Math.max(target.r1,target.r2);r++) for(let c=Math.min(target.c1,target.c2);c<=Math.max(target.c1,target.c2);c++) next[`${r},${c}`]={...seed}; return next }); forceRerender(); setSelection(target); setDragMode(null) }, [dragMode, selection, engine, forceRerender, cellStyles])
+  const fillTo = useCallback((row, col) => { if (dragMode !== 'fill' || !selection) return; const target={ r1: selection.r1, c1: selection.c1, r2: row, c2: col }; engine.fillRange(selection, target); forceRerender(); setSelection(target); setDragMode(null) }, [dragMode, selection, engine, forceRerender])
 
   // ────── Keyboard navigation ──────
 
@@ -234,8 +229,6 @@ export default function App() {
     // Remove style entry for cleared cell
     // Note: This deletes the style object entirely - if you need to preserve default styles,
     // you may want to set them explicitly rather than deleting
-    const key = `${selectedCell.r},${selectedCell.c}`
-    setCellStyles(prev => { const next = { ...prev }; delete next[key]; return next })
     setEditValue('')
   }, [selectedCell, engine, forceRerender])
 
@@ -246,7 +239,7 @@ export default function App() {
       }
     }
     forceRerender()
-    setCellStyles({})
+    engine.applyFormatState({ styles: {}, widths: {}, rowHeights: {}, freezeRows: 0 })
     setSelectedCell(null)
     setEditingCell(null)
     setEditValue('')
@@ -440,7 +433,7 @@ export default function App() {
                     const isSelected = selection && rowIndex >= Math.min(selection.r1, selection.r2) && rowIndex <= Math.max(selection.r1, selection.r2) && colIndex >= Math.min(selection.c1, selection.c2) && colIndex <= Math.max(selection.c1, selection.c2)
                     const isEditing = editingCell?.r === rowIndex && editingCell?.c === colIndex
                     const cellData = engine.getCell(rowIndex, colIndex)
-                    const style = cellStyles[`${rowIndex},${colIndex}`] || {}
+                    const style = engine.getCellStyle(rowIndex, colIndex) || {}
                     const displayValue = cellData.error
                       ? cellData.error
                       : (cellData.computed !== null && cellData.computed !== '' ? String(cellData.computed) : cellData.raw)

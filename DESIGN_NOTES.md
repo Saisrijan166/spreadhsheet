@@ -6,7 +6,7 @@
 
 ## Data model and API
 
-- The sheet remains a sparse `Map` keyed by A1 coordinates; formulas use its dependency graph.
+- The sheet remains a sparse `Map` keyed by A1 coordinates; formulas use its dependency graph. Styles, number formats, frozen rows, column widths, row heights and stable row ids are engine state and snapshots.
 - `fillRange(source, target)`: fills a rectangle in one undo entry; shifts relative formula references and preserves absolute markers.
 - `clearRange(range)`: clears a rectangle in one undo entry.
 - `sortRange(range, column, direction, visibleRows)`: stable physical row sort in one undo entry.
@@ -15,8 +15,7 @@
 
 ## Undo
 
-- Fill, clear range and sort store one pre-operation snapshot.
-- Existing cell and structural undo are unchanged. AI format application does not yet participate in engine undo; this is incomplete.
+- Fill, clear range, sort, structure edits and AI format apply store one engine snapshot. A no-op format action adds no history entry.
 
 ## AI
 
