@@ -952,6 +952,18 @@ export function createEngine(initialRows = 50, initialCols = 50) {
         _generation++; recalculate(); pushToUndoStack({ type: 'bulk', snap: before, oldRows, oldCols })
     }
 
+    function executeSort(range, column, direction = 'asc', visibleRows = null, header = true, keepLast = true) {
+        const before = takeSnapshot(), oldRows = rows, oldCols = cols
+        const start = Math.min(range.r1, range.r2) + (header ? 1 : 0), end = Math.max(range.r1, range.r2) - (keepLast ? 1 : 0)
+        const candidates = []; for (let r = start; r <= end; r++) if (!visibleRows || visibleRows.includes(r)) candidates.push(r)
+        const asDate = value => { const s = String(value).trim(); const d = /^\d{4}-\d{1,2}-\d{1,2}$/.test(s) || /^\d{1,2}\/\d{1,2}\/\d{4}$/.test(s) || /^\d{1,2} [A-Za-z]{3,} \d{4}$/.test(s) ? Date.parse(s) : NaN; return d }
+        const compare = (a, b) => { const av=getCellForDisplay(a,column).computed, bv=getCellForDisplay(b,column).computed, an=Number(String(av).replace(/[$,%\s]/g,'')),bn=Number(String(bv).replace(/[$,%\s]/g,'')), ad=asDate(av),bd=asDate(bv); if(String(av??'').trim()==='')return 1;if(String(bv??'').trim()==='')return -1; let d=Number.isFinite(ad)&&Number.isFinite(bd)?ad-bd:Number.isFinite(an)&&Number.isFinite(bn)?an-bn:typeof av==='number'?-1:typeof bv==='number'?1:String(av).localeCompare(String(bv),undefined,{sensitivity:'accent'}); return direction==='desc'?-d:d }
+        const ordered = candidates.map((r,i)=>({r,i})).sort((a,b)=>compare(a.r,b.r)||a.i-b.i).map(x=>x.r)
+        const copies = ordered.map(r => Array.from({length: cols}, (_,c) => getCellRaw(r,c)))
+        for (let i=0;i<candidates.length;i++) for(let c=0;c<cols;c++) { const v=copies[i][c]; setCellRaw(candidates[i],c,v.raw) }
+        _generation++; recalculate(); pushToUndoStack({ type: 'bulk', snap: before, oldRows, oldCols })
+    }
+
     // ── Public API ──
     // The engine exposes a limited API to prevent direct access to internal state
     // All cell operations go through the public methods which handle undo/redo,
@@ -964,6 +976,7 @@ export function createEngine(initialRows = 50, initialCols = 50) {
         setCell: executeSetCell,
         fillRange: executeFill,
         clearRange: executeClearRange,
+        sortRange: executeSort,
         insertRow: executeInsertRow,
         deleteRow: executeDeleteRow,
         insertColumn: executeInsertColumn,
