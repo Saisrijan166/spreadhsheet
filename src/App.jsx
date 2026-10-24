@@ -69,7 +69,7 @@ export default function App() {
       else if (checked.action.type === 'clarify') setAiResult({ action: checked.action, result: { question: checked.action.question } })
       else setAiResult({ action: checked.action, result: { message: 'Format plan ready.' } })
     } catch (error) { setAiError(error.message || 'PROVIDER_ERROR') }
-  }, [aiPrompt, engine, getColumnLabel, selectedCell])
+  }, [aiPrompt, engine, selectedCell])
 
   const applyAiFormat = useCallback(() => {
     if (!aiResult?.action || aiResult.action.type !== 'format_sheet') return
