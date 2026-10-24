@@ -126,8 +126,8 @@ function createDependencyGraph() {
         for (const cell of affectedCells) {
             if (inDegree.get(cell) === 0) queue.push(cell)
         }
-        while (queue.length > 0) {
-            const cell = queue.shift()
+        for (let queueIndex = 0; queueIndex < queue.length; queueIndex++) {
+            const cell = queue[queueIndex]
             sorted.push(cell)
             for (const dependent of getDependents(cell)) {
                 if (affectedCells.has(dependent)) {
@@ -558,7 +558,8 @@ export function createEngine(initialRows = 50, initialCols = 50) {
         }
 
         if (!cell.raw.startsWith('=')) {
-            const numericValue = parseFloat(cell.raw)
+            const cleaned = String(cell.raw).trim().replace(/[$,\s]/g, '')
+            const numericValue = /^-?\d+(\.\d+)?%?$/.test(cleaned) ? Number(cleaned.replace('%', '')) / (cleaned.endsWith('%') ? 100 : 1) : NaN
             visited.delete(cellKey)
             return isNaN(numericValue) ? cell.raw : numericValue
         }
@@ -592,8 +593,9 @@ export function createEngine(initialRows = 50, initialCols = 50) {
         }
         // Process any remaining affected cells that weren't in the sorted list
         // (e.g., cells with no dependencies or circular dependencies)
+        const sortedSet = new Set(sorted)
         for (const cell of affected) {
-            if (!sorted.includes(cell)) {
+            if (!sortedSet.has(cell)) {
                 computedCache.delete(cell)
                 resolveCellValue(cell)
             }
@@ -975,15 +977,21 @@ export function createEngine(initialRows = 50, initialCols = 50) {
         const before = takeSnapshot(), oldRows = rows, oldCols = cols
         const start = Math.min(range.r1, range.r2) + (header ? 1 : 0), end = Math.max(range.r1, range.r2) - (keepLast ? 1 : 0)
         const candidates = []; for (let r = start; r <= end; r++) if (!visibleRows || visibleRows.includes(r)) candidates.push(r)
-        const asDate = value => { const s = String(value).trim(); const d = /^\d{4}-\d{1,2}-\d{1,2}$/.test(s) || /^\d{1,2}\/\d{1,2}\/\d{4}$/.test(s) || /^\d{1,2} [A-Za-z]{3,} \d{4}$/.test(s) ? Date.parse(s) : NaN; return d }
-        const compare = (a, b) => { const av=getCellForDisplay(a,column).computed, bv=getCellForDisplay(b,column).computed, an=Number(String(av).replace(/[$,%\s]/g,'')),bn=Number(String(bv).replace(/[$,%\s]/g,'')), ad=asDate(av),bd=asDate(bv); if(String(av??'').trim()==='')return 1;if(String(bv??'').trim()==='')return -1; let d=Number.isFinite(ad)&&Number.isFinite(bd)?ad-bd:Number.isFinite(an)&&Number.isFinite(bn)?an-bn:typeof av==='number'?-1:typeof bv==='number'?1:String(av).localeCompare(String(bv),undefined,{sensitivity:'accent'}); return direction==='desc'?-d:d }
+        const asDate = value => { const s = String(value).trim(), m=s.match(/^(\d{4})-(\d{1,2})-(\d{1,2})$/) || s.match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})$/); if (!m) return NaN; return m[1].length === 4 ? Date.UTC(m[1],m[2]-1,m[3]) : Date.UTC(m[3],m[1]-1,m[2]) }
+        const sortValues = new Map(candidates.map(row => { const cell=getCellRaw(row,column), value=cell.raw.startsWith('=') ? getCellForDisplay(row,column).computed : cell.raw, text=String(value ?? '').trim(), date=asDate(value), number=Number(text.replace(/[$,%\s]/g,'')); return [row, { text, date, number }] }))
+        const compare = (a, b) => { const av=sortValues.get(a), bv=sortValues.get(b); if(!av.text)return 1;if(!bv.text)return -1; let d=Number.isFinite(av.date)&&Number.isFinite(bv.date)?av.date-bv.date:Number.isFinite(av.number)&&Number.isFinite(bv.number)?av.number-bv.number:Number.isFinite(av.number)?-1:Number.isFinite(bv.number)?1:av.text.localeCompare(bv.text,undefined,{sensitivity:'accent'}); return direction==='desc'?-d:d }
         const ordered = candidates.map((r,i)=>({r,i})).sort((a,b)=>compare(a.r,b.r)||a.i-b.i).map(x=>x.r)
         const copies = ordered.map(r => Array.from({length: cols}, (_,c) => getCellRaw(r,c)))
-        for (let i=0;i<candidates.length;i++) for(let c=0;c<cols;c++) { const v=copies[i][c]; setCellRaw(candidates[i],c,v.raw) }
-        _generation++; recalculate(); pushToUndoStack({ type: 'bulk', snap: before, oldRows, oldCols })
+        const styleCopies = ordered.map(r => Array.from({length: cols}, (_,c) => styles.get(styleKey(r,c))))
+        const ids = ordered.map(r => rowIds[r])
+        for (const row of candidates) for (let c=0;c<cols;c++) cells.delete(cellKey(row,c))
+        for (let i=0;i<candidates.length;i++) for(let c=0;c<cols;c++) { const v=copies[i][c]; const raw=shiftForFill(v.raw, candidates[i] - ordered[i], 0); if (raw) cells.set(cellKey(candidates[i],c), { raw, computed: null, error: null }) }
+        for (let i=0;i<candidates.length;i++) { rowIds[candidates[i]] = ids[i]; for(let c=0;c<cols;c++) { const style=styleCopies[i][c], key=styleKey(candidates[i],c); if(style) styles.set(key,{...style}); else styles.delete(key) } }
+        graph.clear(); computedCache.clear(); dirtyCells.clear(); _generation++; for (const [key, value] of cells) if (value.raw.startsWith('=')) updateDependencies(key, value.raw); markAllCellsDirty(); recalculate(); pushToUndoStack({ type: 'bulk', snap: before, oldRows, oldCols })
     }
 
     function formatState() { return { styles: Object.fromEntries([...styles].map(([key, value]) => [key, { ...value }])), widths: Object.fromEntries(columnWidths), rowHeights: Object.fromEntries(rowHeights), freezeRows: frozenRows } }
+    function usedRange() { let r2 = 0, c2 = 0; for (const key of cells.keys()) { const point = cellCoords(key); r2 = Math.max(r2, point.row); c2 = Math.max(c2, point.col) } return { r1: 0, c1: 0, r2, c2 } }
     function sameState(a, b) { return JSON.stringify(a) === JSON.stringify(b) }
     function applyFormatState(next) {
         const before = takeSnapshot(), current = formatState()
@@ -1008,6 +1016,7 @@ export function createEngine(initialRows = 50, initialCols = 50) {
         getCell: getCellForDisplay,
         getCellStyle: (row, col) => ({ ...(styles.get(styleKey(row, col)) || {}) }),
         getFormatState: formatState,
+        getUsedRange: usedRange,
         applyFormatState,
         setCellStyle,
         setCell: executeSetCell,
