@@ -1,6 +1,6 @@
 # Submission status
 
-No remote push or pull request was attempted. Run after configuring a fork and GitHub authentication:
+No remote push or pull request was attempted. The local implementation is on `challenge-3-virtual-grid`; run after configuring a fork and GitHub authentication:
 
 ```bash
 git push -u origin challenge-1-fill-handle

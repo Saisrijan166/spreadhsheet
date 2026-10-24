@@ -28,7 +28,7 @@
 
 - `npm test`, `npm run lint`, and `npm run build` pass on this checkout.
 - `node scripts/verify.mjs` passes all 20 query golden plans against `sales-large.tsv` for columns and displayed row count. It does not yet verify every expected row/value or format golden case.
-- No browser performance measurements were made; no numbers are reported.
+- Production measurement, run once on 2026-10-24: `npm run build`, `vite preview --host 127.0.0.1`, then `node scripts/measure.mjs` with puppeteer-core and `/usr/bin/google-chrome` at 1440×900. First contentful paint was 576.0 ms. At row 95,000, 60 requestAnimationFrame intervals averaged 27.78 ms; maximum was 683.20 ms. With 50,000 filled cells, input-to-next-frame latency was 13.70 ms. React commit count while typing J95000 was not measured because React profiler instrumentation is not mounted in the production build.
 - The main grid is a virtual 100,000 × 200 surface. Prefix sums plus binary search select visible rows/columns with overscan; its sparse engine map means empty cells are not allocated. To fill K2 to K100000, enter the seed in K2, name-box-select `K2:K100000` (or extend selection), then press Ctrl+D.
 
 ## Gaps / next work

@@ -9,6 +9,7 @@ import VirtualGrid from './grid/VirtualGrid.jsx'
 
 const TOTAL_ROWS = 100000
 const TOTAL_COLS = 200
+function getColumnLabel(col) { let label='', num=col+1; while(num>0){num--;label=String.fromCharCode(65+(num%26))+label;num=Math.floor(num/26)} return label }
 
 export default function App() {
   // Engine instance is created once and reused across renders
@@ -299,17 +300,6 @@ export default function App() {
   const selectedCellStyle = useMemo(() => {
     return selectedCell ? getCellStyle(selectedCell.r, selectedCell.c) : null
   }, [selectedCell, getCellStyle])
-
-  const getColumnLabel = useCallback((col) => {
-    let label = ''
-    let num = col + 1
-    while (num > 0) {
-      num--
-      label = String.fromCharCode(65 + (num % 26)) + label
-      num = Math.floor(num / 26)
-    }
-    return label
-  }, [])
 
   const selectedCellLabel = selectedCell
     ? `${getColumnLabel(selectedCell.c)}${selectedCell.r + 1}`
