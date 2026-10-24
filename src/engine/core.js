@@ -200,18 +200,18 @@ function tokenize(expression) {
             continue
         }
 
-        if ((char >= 'A' && char <= 'Z') || (char >= 'a' && char <= 'z')) {
+        if (char === '$' || (char >= 'A' && char <= 'Z') || (char >= 'a' && char <= 'z')) {
             let identifier = ''
-            while (position < expression.length && ((expression[position] >= 'A' && expression[position] <= 'Z') || (expression[position] >= 'a' && expression[position] <= 'z') || (expression[position] >= '0' && expression[position] <= '9'))) {
+            while (position < expression.length && (expression[position] === '$' || (expression[position] >= 'A' && expression[position] <= 'Z') || (expression[position] >= 'a' && expression[position] <= 'z') || (expression[position] >= '0' && expression[position] <= '9'))) {
                 identifier += expression[position].toUpperCase()
                 position++
             }
             if (position < expression.length && expression[position] === ':') {
                 tokens.push({ type: 'cell', value: identifier })
             } else {
-                const cellMatch = identifier.match(/^([A-Z]+)(\d+)$/)
+                const cellMatch = identifier.match(/^\$?([A-Z]+)\$?(\d+)$/)
                 if (cellMatch) {
-                    tokens.push({ type: 'cell', value: identifier })
+                    tokens.push({ type: 'cell', value: identifier.replaceAll('$', '') })
                 } else {
                     tokens.push({ type: 'function', value: identifier })
                 }
@@ -434,7 +434,7 @@ function shiftCellReferences(formula, rowShift, colShift, atIndex, isColumnOpera
     // Shift cell references in formulas when rows/columns are inserted or deleted
     // Note: This function modifies ALL cell references in the formula, including those
     // in ranges. The logic ensures references shift correctly based on the operation type.
-    return formula.replace(/([A-Z]+)(\d+)/g, (match, colLetter, rowStr) => {
+    return formula.replace(/(\$?)([A-Z]+)(\$?)(\d+)/g, (match, absCol, colLetter, absRow, rowStr) => {
         const colIdx = columnLetterToIndex(colLetter)
         const rowIdx = parseInt(rowStr) - 1
         let newRow = rowIdx
@@ -442,16 +442,18 @@ function shiftCellReferences(formula, rowShift, colShift, atIndex, isColumnOpera
 
         if (isColumnOperation) {
             // For column operations, only shift columns at or after the insertion/deletion point
-            if (colIdx >= atIndex) newCol = colIdx + colShift
+            if (!absCol && colIdx >= atIndex) newCol = colIdx + colShift
         } else {
             // For row operations, only shift rows at or after the insertion/deletion point
-            if (rowIdx >= atIndex) newRow = rowIdx + rowShift
+            if (!absRow && rowIdx >= atIndex) newRow = rowIdx + rowShift
         }
 
         // Preserve original reference if shifting would result in invalid coordinates
         // This prevents formulas from breaking when rows/cols are deleted at boundaries
         if (newRow < 0 || newCol < 0) return match
-        return indexToCellKey(newRow, newCol)
+        const shifted = indexToCellKey(newRow, newCol)
+        const parts = shifted.match(/^([A-Z]+)(\d+)$/)
+        return `${absCol}${parts[1]}${absRow}${parts[2]}`
     })
 }
 
@@ -460,10 +462,10 @@ function extractCellReferences(formula) {
     // Extract cell references using regex
     // Note: This regex matches cell references like A1, B2, AA10, etc.
     // It does NOT extract individual cells from ranges (e.g., A1:A5 only extracts A1 and A5)
-    const regex = /([A-Z]+\d+)/g
+    const regex = /(\$?[A-Z]+\$?\d+)/g
     let match
     while ((match = regex.exec(formula)) !== null) {
-        references.add(match[1])
+        references.add(match[1].replaceAll('$', ''))
     }
     return references
 }
@@ -898,6 +900,58 @@ export function createEngine(initialRows = 50, initialCols = 50) {
         return { raw: cell.raw, computed: value, error: null }
     }
 
+    function shiftForFill(raw, rowDelta, colDelta) {
+        if (!raw?.startsWith('=')) return raw
+        return raw.replace(/(\$?)([A-Z]+)(\$?)(\d+)/g, (match, absCol, letters, absRow, number) => {
+            const col = columnLetterToIndex(letters) + (absCol ? 0 : colDelta)
+            const row = Number(number) - 1 + (absRow ? 0 : rowDelta)
+            if (col < 0 || row < 0) return match
+            const key = indexToCellKey(row, col).match(/^([A-Z]+)(\d+)$/)
+            return `${absCol}${key[1]}${absRow}${key[2]}`
+        })
+    }
+
+    function nextSeriesValue(seed, index) {
+        const match = String(seed).match(/^(.*?)(\d+)$/)
+        if (!match) return seed
+        const width = match[2].length
+        return `${match[1]}${String(Number(match[2]) + index).padStart(width, '0')}`
+    }
+
+    function executeFill(source, target) {
+        const top = Math.min(source.r1, source.r2), left = Math.min(source.c1, source.c2)
+        const bottom = Math.max(source.r1, source.r2), right = Math.max(source.c1, source.c2)
+        const tTop = Math.min(target.r1, target.r2), tLeft = Math.min(target.c1, target.c2)
+        const tBottom = Math.max(target.r1, target.r2), tRight = Math.max(target.c1, target.c2)
+        const before = takeSnapshot(), oldRows = rows, oldCols = cols
+        if (tBottom + 1 > rows) rows = tBottom + 1
+        if (tRight + 1 > cols) cols = tRight + 1
+        const height = bottom - top + 1, width = right - left + 1
+        const vertical = tTop !== top || tBottom !== bottom
+        for (let r = tTop; r <= tBottom; r++) for (let c = tLeft; c <= tRight; c++) {
+            if (r >= top && r <= bottom && c >= left && c <= right) continue
+            const sr = top + ((r - top) % height + height) % height
+            const sc = left + ((c - left) % width + width) % width
+            const raw = getCellRaw(sr, sc).raw
+            let value = shiftForFill(raw, r - sr, c - sc)
+            if (!raw.startsWith('=') && vertical && height === 2 && width === 1) {
+                const first = getCellRaw(top, left).raw, second = getCellRaw(top + 1, left).raw
+                const a = Number(first), b = Number(second)
+                if (Number.isFinite(a) && Number.isFinite(b)) value = String(a + (r - top) * (b - a))
+                else if (/\d+$/.test(first) && /\d+$/.test(second)) value = nextSeriesValue(first, r - top)
+            }
+            setCellRaw(r, c, value)
+        }
+        _generation++; recalculate()
+        pushToUndoStack({ type: 'bulk', snap: before, oldRows, oldCols })
+    }
+
+    function executeClearRange(range) {
+        const before = takeSnapshot(), oldRows = rows, oldCols = cols
+        for (let r = range.r1; r <= range.r2; r++) for (let c = range.c1; c <= range.c2; c++) setCellRaw(r, c, '')
+        _generation++; recalculate(); pushToUndoStack({ type: 'bulk', snap: before, oldRows, oldCols })
+    }
+
     // ── Public API ──
     // The engine exposes a limited API to prevent direct access to internal state
     // All cell operations go through the public methods which handle undo/redo,
@@ -908,6 +962,8 @@ export function createEngine(initialRows = 50, initialCols = 50) {
         get cols() { return cols },
         getCell: getCellForDisplay,
         setCell: executeSetCell,
+        fillRange: executeFill,
+        clearRange: executeClearRange,
         insertRow: executeInsertRow,
         deleteRow: executeDeleteRow,
         insertColumn: executeInsertColumn,
