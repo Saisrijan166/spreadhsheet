@@ -14,9 +14,9 @@ const scroll = await page.evaluate(async () => {
   const frames = marks.slice(1).map((time, index) => time - marks[index])
   return { max: Math.max(...frames), average: frames.reduce((sum, value) => sum + value, 0) / frames.length }
 })
-await page.locator('.name-box').fill('J2:J50001')
+await page.locator('.name-box').fill('K2:K50001')
 await page.click('.name-box'); await page.keyboard.press('Enter')
-await page.locator('.formula-bar-input').fill('1')
+await page.locator('.formula-bar-input').fill('=J2*2')
 await page.click('.formula-bar-input'); await page.keyboard.press('Enter')
 await page.keyboard.down('Control'); await page.keyboard.press('d'); await page.keyboard.up('Control')
 await new Promise(resolve => setTimeout(resolve, 250))

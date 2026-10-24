@@ -20,6 +20,7 @@ export default function App() {
   const [dragMode, setDragMode] = useState(null)
   const [editingCell, setEditingCell] = useState(null)
   const [editValue, setEditValue] = useState('')
+  const editValueRef = useRef('')
   // Cell styles are stored separately from engine data
   // Format: { "row,col": { bold: bool, italic: bool, ... } }
   const cellInputRef = useRef(null)
@@ -102,15 +103,15 @@ export default function App() {
     setSelectedCell({ r: row, c: col })
     setEditingCell({ r: row, c: col })
     const cellData = engine.getCell(row, col)
-    setEditValue(cellData.raw)
+    editValueRef.current = cellData.raw; setEditValue(cellData.raw)
     setTimeout(() => cellInputRef.current?.focus(), 0)
   }, [engine])
 
   const commitEdit = useCallback((row, col) => {
     // Only commit if the value actually changed to avoid unnecessary recalculations
     const currentCell = engine.getCell(row, col)
-    if (currentCell.raw !== editValue) {
-      engine.setCell(row, col, editValue)
+    if (currentCell.raw !== editValueRef.current) {
+      engine.setCell(row, col, editValueRef.current)
       forceRerender()
     }
     setEditingCell(null)
@@ -138,6 +139,7 @@ export default function App() {
       startEditing(row, Math.min(col + 1, engine.cols - 1))
     } else if (event.key === 'Escape') {
       setEditValue(engine.getCell(row, col).raw)
+      editValueRef.current = engine.getCell(row, col).raw
       setEditingCell(null)
     } else if (event.key === 'ArrowDown') {
       event.preventDefault()
@@ -172,14 +174,15 @@ export default function App() {
   const handleFormulaBarFocus = useCallback(() => {
     if (selectedCell && !editingCell) {
       setEditingCell(selectedCell)
-      setEditValue(engine.getCell(selectedCell.r, selectedCell.c).raw)
+      const raw=engine.getCell(selectedCell.r, selectedCell.c).raw; editValueRef.current=raw; setEditValue(raw)
     }
   }, [selectedCell, editingCell, engine])
 
   const handleFormulaBarChange = useCallback((value) => {
     if (!editingCell && selectedCell) setEditingCell(selectedCell)
-    setEditValue(value)
+    editValueRef.current = value
   }, [editingCell, selectedCell])
+  const changeEdit = useCallback(value => { editValueRef.current = value; setEditValue(value) }, [])
 
   const jumpToName = useCallback(() => { const point=text=>{const match=text.match(/^([A-Z]+)(\d+)$/);if(!match)return null;let col=0;for(const char of match[1])col=col*26+char.charCodeAt(0)-64;return {r:Math.max(0,Number(match[2])-1),c:col-1}}; const [from,to]=nameBox.trim().toUpperCase().split(':').map(point); if(!from||!to||to.r>=engine.rows||to.c>=engine.cols)return;setSelectedCell(to);setSelection({r1:from.r,c1:from.c,r2:to.r,c2:to.c}) }, [nameBox, engine])
 
@@ -400,7 +403,8 @@ export default function App() {
           <input className="formula-bar-label name-box" value={nameBox || selectedCellLabel} onChange={e => setNameBox(e.target.value)} onKeyDown={e => { if(e.key==='Enter')jumpToName() }} />
           <input
             className="formula-bar-input"
-            value={formulaBarValue}
+            key={selectedCellLabel}
+            defaultValue={formulaBarValue}
             onChange={(e) => handleFormulaBarChange(e.target.value)}
             onKeyDown={handleFormulaBarKeyDown}
             onFocus={handleFormulaBarFocus}
@@ -409,7 +413,7 @@ export default function App() {
         </div>
 
         {/* ── Grid ── */}
-        <VirtualGrid engine={engine} version={version} selection={selection} editingCell={editingCell} editValue={editValue} onEdit={startEditing} onChangeEdit={setEditValue} onCommit={commitEdit} onSelect={beginCellDrag} onExtend={extendDrag} onHeaderSort={sortColumn} rowVisible={rowVisible} />
+        <VirtualGrid engine={engine} version={version} selection={selection} editingCell={editingCell} editValue={editValue} onEdit={startEditing} onChangeEdit={changeEdit} onCommit={commitEdit} onSelect={beginCellDrag} onExtend={extendDrag} onHeaderSort={sortColumn} rowVisible={rowVisible} />
 
         <p className="footer-hint">
           Virtualized 100,000 × 200 · Name box jumps to AZ5000 · select K2:K100000 and press Ctrl+D to fill down
