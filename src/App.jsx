@@ -4,6 +4,7 @@ import { createEngine } from './engine/core.js'
 import { loadSampleSmall, loadSampleLarge } from './fixtures/loadSample.js'
 import { createProvider } from './ai/provider.js'
 import { executeQuery, parseAction, validateAction } from './ai/runtime.js'
+import { applyFormat } from './ai/format.js'
 
 const TOTAL_ROWS = 50
 const TOTAL_COLS = 50
@@ -25,6 +26,7 @@ export default function App() {
   const [aiResult, setAiResult] = useState(null)
   const [aiError, setAiError] = useState('')
   const [showPlan, setShowPlan] = useState(true)
+  const [formatState, setFormatState] = useState({ styles: {}, widths: {}, freezeRows: 0 })
 
   const forceRerender = useCallback(() => setVersion(v => v + 1), [])
 
@@ -46,9 +48,17 @@ export default function App() {
       const checked = validateAction(parsed.action); if (checked.error) throw new Error(`${checked.error}: ${checked.detail}`)
       if (checked.action.type === 'query') setAiResult({ action: checked.action, result: executeQuery(values.map(row => row.slice(0, headers.length)), checked.action) })
       else if (checked.action.type === 'clarify') setAiResult({ action: checked.action, result: { question: checked.action.question } })
-      else setAiResult({ action: checked.action, result: { message: 'Format plan ready; apply controls are not yet available.' } })
+      else setAiResult({ action: checked.action, result: { message: 'Format plan ready.' } })
     } catch (error) { setAiError(error.message || 'PROVIDER_ERROR') }
   }, [aiPrompt, engine, getColumnLabel, selectedCell])
+
+  const applyAiFormat = useCallback(() => {
+    if (!aiResult?.action || aiResult.action.type !== 'format_sheet') return
+    const matrix = Array.from({ length: engine.rows }, (_, r) => Array.from({ length: engine.cols }, (_, c) => engine.getCell(r, c).computed ?? ''))
+    const applied = applyFormat(matrix, formatState, aiResult.action)
+    if (applied.code === 'APPLIED') { setFormatState(applied.state); setCellStyles(applied.state.styles) }
+    setAiResult(result => ({ ...result, result: { message: applied.code } }))
+  }, [aiResult, engine, formatState])
 
   // ────── Cell style helpers ──────
 
@@ -475,7 +485,7 @@ export default function App() {
         <textarea value={aiPrompt} onChange={e => setAiPrompt(e.target.value)} placeholder="Ask about this sheet" />
         <div><button className="toolbar-btn" onClick={askAi}>Run</button><label><input type="checkbox" checked={showPlan} onChange={e => setShowPlan(e.target.checked)} /> Show plan</label></div>
         {aiError && <p className="ai-error">{aiError}</p>}
-        {aiResult && <div className="ai-result">{showPlan && <pre>{JSON.stringify(aiResult.action, null, 2)}</pre>}{aiResult.result.question && <p>{aiResult.result.question}</p>}{aiResult.result.error && <p className="ai-error">{aiResult.result.detail}</p>}{aiResult.result.columns && <><p>{aiResult.result.rowCount} rows{aiResult.result.truncated ? ' (truncated)' : ''}</p><table><thead><tr>{aiResult.result.columns.map(c => <th key={c}>{c}</th>)}</tr></thead><tbody>{aiResult.result.rows.map((row, i) => <tr key={i}>{row.map((v, j) => <td key={j}>{String(v ?? '')}</td>)}</tr>)}</tbody></table></>}</div>}
+        {aiResult && <div className="ai-result">{showPlan && <pre>{JSON.stringify(aiResult.action, null, 2)}</pre>}{aiResult.result.question && <p>{aiResult.result.question}</p>}{aiResult.result.message && <><p>{aiResult.result.message}</p>{aiResult.action.type === 'format_sheet' && <button className="toolbar-btn" onClick={applyAiFormat}>Apply</button>}</>}{aiResult.result.error && <p className="ai-error">{aiResult.result.detail}</p>}{aiResult.result.columns && <><p>{aiResult.result.rowCount} rows{aiResult.result.truncated ? ' (truncated)' : ''}</p><table><thead><tr>{aiResult.result.columns.map(c => <th key={c}>{c}</th>)}</tr></thead><tbody>{aiResult.result.rows.map((row, i) => <tr key={i}>{row.map((v, j) => <td key={j}>{String(v ?? '')}</td>)}</tr>)}</tbody></table></>}</div>}
       </aside>}
     </div>
   )
