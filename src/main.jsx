@@ -3,8 +3,7 @@ import { createRoot } from 'react-dom/client'
 import './index.css'
 import App from './App.jsx'
 
-createRoot(document.getElementById('root')).render(
-  <StrictMode>
-    <App />
-  </StrictMode>,
-)
+const measured = import.meta.env.VITE_MEASURE === '1'
+if (measured) window.__reactCommitCount = 0
+const app = <StrictMode><App /></StrictMode>
+createRoot(document.getElementById('root')).render(app)

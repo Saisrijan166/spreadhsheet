@@ -2,7 +2,6 @@ import { useState, useRef, useCallback, useEffect, useMemo } from 'react'
 import './App.css'
 import { createEngine } from './engine/core.js'
 import { loadSampleSmall, loadSampleLarge } from './fixtures/loadSample.js'
-import { createProvider } from './ai/provider.js'
 import { executeQuery, parseAction, validateAction } from './ai/runtime.js'
 import { applyFormat } from './ai/format.js'
 import VirtualGrid from './grid/VirtualGrid.jsx'
@@ -33,6 +32,8 @@ export default function App() {
   const [sortState, setSortState] = useState({})
   const [nameBox, setNameBox] = useState('')
 
+  useEffect(() => { if (import.meta.env.VITE_MEASURE === '1') window.__reactCommitCount = (window.__reactCommitCount || 0) + 1 })
+
   const forceRerender = useCallback(() => setVersion(v => v + 1), [])
   const rowVisible = useCallback((row) => Object.entries(filters).every(([col, filter]) => { const value=String(engine.getCell(row, Number(col)).computed ?? '').trim(), normalized=value.toLowerCase(), selected=!filter.values?.length || filter.values.some(item => item.toLowerCase() === normalized); let condition=true; if (filter.op === 'empty') condition=!value; else if (filter.op === 'contains') condition=normalized.includes((filter.value || '').trim().toLowerCase()); else if (filter.op === 'gt') condition=Number(value.replace(/[$,%\s]/g, '')) > Number(filter.value); else if (filter.op === 'lt') condition=Number(value.replace(/[$,%\s]/g, '')) < Number(filter.value); return selected && condition }), [filters, engine])
   const sortColumn = useCallback((col) => { const prior=sortState[col] || 'original'; const next=prior === 'original' ? 'asc' : prior === 'asc' ? 'desc' : 'original'; if (next === 'original') { engine.undo(); forceRerender() } else { const visible=Array.from({length: engine.rows-2},(_,i)=>i+1).filter(rowVisible); engine.sortRange({r1:0,c1:0,r2:engine.rows-1,c2:engine.cols-1}, col, next, visible); forceRerender() }; setSortState({[col]:next}) }, [sortState, engine, forceRerender, rowVisible])
@@ -61,6 +62,7 @@ export default function App() {
     const headers = values[0].filter((v, i) => v !== '' || values.some(row => row[i] !== ''))
     const context = { range: `A1:${getColumnLabel(Math.max(0, headers.length - 1))}${engine.rows}`, rowCount: Math.max(0, values.length - 1), columns: headers.map((name, index) => ({ name, index, type: 'text', examples: values.slice(1, 3).map(row => String(row[index] ?? '')) })), sampleRows: values.slice(1, 6).map(row => row.slice(0, headers.length)), selection: selectedCell ? `${getColumnLabel(selectedCell.c)}${selectedCell.r + 1}` : null }
     try {
+      const { createProvider } = await import('./ai/provider.js')
       const provider = createProvider()
       const response = await provider.complete({ system: 'Translate the request into one permitted spreadsheet action. Respond with JSON only.', user: `${aiPrompt}\n\nContext: ${JSON.stringify(context)}` })
       const parsed = parseAction(response.text); if (parsed.error) throw new Error(`${parsed.error}: ${parsed.detail}`)
@@ -253,8 +255,8 @@ export default function App() {
 
   // ────── Sample data (fixtures/sales.tsv) ──────
 
-  const loadSample = useCallback((loader) => {
-    loader(engine)
+  const loadSample = useCallback(async (loader) => {
+    await loader(engine)
     forceRerender()
     setSelectedCell({ r: 0, c: 0 })
     setEditingCell(null)

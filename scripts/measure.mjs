@@ -8,6 +8,7 @@ const firstPaint = await page.evaluate(() => performance.getEntriesByType('paint
 const scroll = await page.evaluate(async () => {
   const host = document.querySelector('.virtual-scroll')
   host.scrollTop = 95000 * 24
+  await new Promise(resolve => setTimeout(resolve, 500))
   const marks = []
   await new Promise(resolve => { const sample = time => { marks.push(time); marks.length === 61 ? resolve() : requestAnimationFrame(sample) }; requestAnimationFrame(sample) })
   const frames = marks.slice(1).map((time, index) => time - marks[index])
@@ -21,10 +22,10 @@ await page.keyboard.down('Control'); await page.keyboard.press('d'); await page.
 await new Promise(resolve => setTimeout(resolve, 250))
 await page.locator('.name-box').fill('J95000')
 await page.click('.name-box'); await page.keyboard.press('Enter')
-const latency = await page.evaluate(async () => {
-  const input = document.querySelector('.formula-bar-input')
-  const start = performance.now(); input.focus(); input.value = '42'; input.dispatchEvent(new Event('input', { bubbles: true }))
-  await new Promise(requestAnimationFrame); return performance.now() - start
-})
-console.log(JSON.stringify({ firstContentfulPaintMs: firstPaint, scrollAverageFrameMs: scroll.average, scrollMaxFrameMs: scroll.max, keystrokeNextFrameMs: latency, reactCommitCountWhileTyping: 'not measured: React profiler instrumentation is not mounted in this production build' }))
+await page.click('.formula-bar-input'); await page.keyboard.down('Control'); await page.keyboard.press('a'); await page.keyboard.up('Control')
+await page.evaluate(() => { window.__reactCommitCount = 0; window.__measureStart = performance.now() })
+await page.keyboard.type('42')
+const latency = await page.evaluate(async () => { await new Promise(requestAnimationFrame); return performance.now() - window.__measureStart })
+const commits = await page.evaluate(() => window.__reactCommitCount ?? 'not measured: build without VITE_MEASURE=1')
+console.log(JSON.stringify({ firstContentfulPaintMs: firstPaint, scrollAverageFrameMs: scroll.average, scrollMaxFrameMs: scroll.max, keystrokeNextFrameMs: latency, reactCommitCountWhileTyping: commits }))
 await browser.close()
