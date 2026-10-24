@@ -15,6 +15,8 @@ export default function App() {
   const [engine] = useState(() => createEngine(TOTAL_ROWS, TOTAL_COLS))
   const [, setVersion] = useState(0)
   const [selectedCell, setSelectedCell] = useState(null)
+  const [selection, setSelection] = useState(null)
+  const [dragMode, setDragMode] = useState(null)
   const [editingCell, setEditingCell] = useState(null)
   const [editValue, setEditValue] = useState('')
   // Cell styles are stored separately from engine data
@@ -31,9 +33,17 @@ export default function App() {
   const forceRerender = useCallback(() => setVersion(v => v + 1), [])
 
   useEffect(() => {
-    const onKey = event => { if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === 'k') { event.preventDefault(); setAiOpen(open => !open) } }
+    const onKey = event => {
+      if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === 'k') { event.preventDefault(); setAiOpen(open => !open); return }
+      if (!selectedCell || editingCell) return
+      if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === 'a') { event.preventDefault(); setSelection({ r1: 0, c1: 0, r2: engine.rows - 1, c2: engine.cols - 1 }); return }
+      if (event.key === 'Delete' || event.key === 'Backspace') { event.preventDefault(); if (selection) { engine.clearRange(selection); forceRerender() }; return }
+      const shifts = { ArrowDown:[1,0], ArrowUp:[-1,0], ArrowLeft:[0,-1], ArrowRight:[0,1] }
+      if (event.shiftKey && shifts[event.key]) { event.preventDefault(); const [dr,dc]=shifts[event.key]; const anchor=selection||{r1:selectedCell.r,c1:selectedCell.c}; setSelection({ r1:anchor.r1,c1:anchor.c1,r2:Math.max(0,Math.min(engine.rows-1,selectedCell.r+dr)),c2:Math.max(0,Math.min(engine.cols-1,selectedCell.c+dc)) }) }
+      else if (event.key === 'F2' || event.key === 'Enter') { event.preventDefault(); setEditingCell(selectedCell); setEditValue(engine.getCell(selectedCell.r, selectedCell.c).raw) }
+    }
     window.addEventListener('keydown', onKey); return () => window.removeEventListener('keydown', onKey)
-  }, [])
+  }, [selectedCell, selection, editingCell, engine, forceRerender])
 
   const askAi = useCallback(async () => {
     if (!aiPrompt.trim()) return
@@ -98,14 +108,16 @@ export default function App() {
     setEditingCell(null)
   }, [engine, editValue, forceRerender])
 
-  const handleCellClick = useCallback((row, col) => {
-    if (editingCell && (editingCell.r !== row || editingCell.c !== col)) {
-      commitEdit(editingCell.r, editingCell.c)
-    }
-    if (!editingCell || editingCell.r !== row || editingCell.c !== col) {
-      startEditing(row, col)
-    }
-  }, [editingCell, commitEdit, startEditing])
+  const beginCellDrag = useCallback((event, row, col) => {
+    event.preventDefault()
+    if (event.shiftKey && selection) { setSelection({ ...selection, r2: row, c2: col }); setSelectedCell({ r: row, c: col }) }
+    else { setSelectedCell({ r: row, c: col }); setSelection({ r1: row, c1: col, r2: row, c2: col }) }
+    setDragMode('select')
+  }, [selection])
+  const extendDrag = useCallback((row, col) => { if (dragMode === 'select') { setSelection(s => s && ({ ...s, r2: row, c2: col })); setSelectedCell({ r: row, c: col }) } }, [dragMode])
+  useEffect(() => { const stop = () => setDragMode(null); window.addEventListener('mouseup', stop); return () => window.removeEventListener('mouseup', stop) }, [])
+  const finishFill = useCallback((event) => { event.preventDefault(); event.stopPropagation(); if (!selection) return; setDragMode('fill') }, [selection])
+  const fillTo = useCallback((row, col) => { if (dragMode !== 'fill' || !selection) return; const target={ r1: selection.r1, c1: selection.c1, r2: row, c2: col }; engine.fillRange(selection, target); const seed=cellStyles[`${selection.r1},${selection.c1}`] || {}; setCellStyles(prev => { const next={...prev}; for(let r=Math.min(target.r1,target.r2);r<=Math.max(target.r1,target.r2);r++) for(let c=Math.min(target.c1,target.c2);c<=Math.max(target.c1,target.c2);c++) next[`${r},${c}`]={...seed}; return next }); forceRerender(); setSelection(target); setDragMode(null) }, [dragMode, selection, engine, forceRerender, cellStyles])
 
   // ────── Keyboard navigation ──────
 
@@ -408,7 +420,7 @@ export default function App() {
               <tr>
                 <th className="col-header-blank"></th>
                 {Array.from({ length: engine.cols }, (_, colIndex) => (
-                  <th key={colIndex} className="col-header">
+                  <th key={colIndex} className="col-header" onMouseDown={() => { setSelection({ r1: 0, r2: engine.rows - 1, c1: colIndex, c2: colIndex }); setSelectedCell({ r: 0, c: colIndex }) }}>
                     {getColumnLabel(colIndex)}
                   </th>
                 ))}
@@ -417,9 +429,9 @@ export default function App() {
             <tbody>
               {Array.from({ length: engine.rows }, (_, rowIndex) => (
                 <tr key={rowIndex}>
-                  <td className="row-header">{rowIndex + 1}</td>
+                  <td className="row-header" onMouseDown={() => { setSelection({ r1: rowIndex, r2: rowIndex, c1: 0, c2: engine.cols - 1 }); setSelectedCell({ r: rowIndex, c: 0 }) }}>{rowIndex + 1}</td>
                   {Array.from({ length: engine.cols }, (_, colIndex) => {
-                    const isSelected = selectedCell?.r === rowIndex && selectedCell?.c === colIndex
+                    const isSelected = selection && rowIndex >= Math.min(selection.r1, selection.r2) && rowIndex <= Math.max(selection.r1, selection.r2) && colIndex >= Math.min(selection.c1, selection.c2) && colIndex <= Math.max(selection.c1, selection.c2)
                     const isEditing = editingCell?.r === rowIndex && editingCell?.c === colIndex
                     const cellData = engine.getCell(rowIndex, colIndex)
                     const style = cellStyles[`${rowIndex},${colIndex}`] || {}
@@ -432,7 +444,9 @@ export default function App() {
                         key={colIndex}
                         className={`cell ${isSelected ? 'selected' : ''}`}
                         style={{ background: style.bg || 'white' }}
-                        onMouseDown={(e) => { e.preventDefault(); handleCellClick(rowIndex, colIndex) }}
+                        onMouseDown={(e) => beginCellDrag(e, rowIndex, colIndex)}
+                        onMouseEnter={() => { extendDrag(rowIndex, colIndex); fillTo(rowIndex, colIndex) }}
+                        onDoubleClick={() => startEditing(rowIndex, colIndex)}
                       >
                         {isEditing ? (
                           <input
@@ -464,7 +478,7 @@ export default function App() {
                               fontSize: (style.fontSize || 13) + 'px',
                             }}
                           >
-                            {displayValue}
+                            {displayValue}{isSelected && rowIndex === Math.max(selection.r1, selection.r2) && colIndex === Math.max(selection.c1, selection.c2) && <span className="fill-handle" onMouseDown={finishFill} />}
                           </div>
                         )}
                       </td>

@@ -347,6 +347,7 @@ body {
   z-index: 1;
   box-shadow: 0 0 0 1px rgba(26, 115, 232, 0.2);
 }
+.fill-handle { position: absolute; right: -4px; bottom: -4px; z-index: 4; width: 8px; height: 8px; background: #1a73e8; border: 1px solid #fff; cursor: crosshair; }
 
 .cell-display {
   padding: 3px 6px;
