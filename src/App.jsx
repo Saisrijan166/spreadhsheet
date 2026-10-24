@@ -115,7 +115,7 @@ export default function App() {
       forceRerender()
     }
     setEditingCell(null)
-  }, [engine, editValue, forceRerender])
+  }, [engine, forceRerender])
 
   const beginCellDrag = useCallback((event, row, col) => {
     event.preventDefault()
