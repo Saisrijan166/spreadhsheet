@@ -987,7 +987,7 @@ export function createEngine(initialRows = 50, initialCols = 50) {
         for (const row of candidates) for (let c=0;c<cols;c++) cells.delete(cellKey(row,c))
         for (let i=0;i<candidates.length;i++) for(let c=0;c<cols;c++) { const v=copies[i][c]; const raw=shiftForFill(v.raw, candidates[i] - ordered[i], 0); if (raw) cells.set(cellKey(candidates[i],c), { raw, computed: null, error: null }) }
         for (let i=0;i<candidates.length;i++) { rowIds[candidates[i]] = ids[i]; for(let c=0;c<cols;c++) { const style=styleCopies[i][c], key=styleKey(candidates[i],c); if(style) styles.set(key,{...style}); else styles.delete(key) } }
-        graph.clear(); computedCache.clear(); dirtyCells.clear(); _generation++; for (const [key, value] of cells) if (value.raw.startsWith('=')) updateDependencies(key, value.raw); markAllCellsDirty(); recalculate(); pushToUndoStack({ type: 'bulk', snap: before, oldRows, oldCols })
+        graph.clear(); computedCache.clear(); dirtyCells.clear(); _generation++; for (const [key, value] of cells) if (value.raw.startsWith('=')) { updateDependencies(key, value.raw); dirtyCells.add(key) } recalculate(); pushToUndoStack({ type: 'bulk', snap: before, oldRows, oldCols })
     }
 
     function formatState() { return { styles: Object.fromEntries([...styles].map(([key, value]) => [key, { ...value }])), widths: Object.fromEntries(columnWidths), rowHeights: Object.fromEntries(rowHeights), freezeRows: frozenRows } }
