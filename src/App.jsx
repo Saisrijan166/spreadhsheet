@@ -5,15 +5,16 @@ import { loadSampleSmall, loadSampleLarge } from './fixtures/loadSample.js'
 import { createProvider } from './ai/provider.js'
 import { executeQuery, parseAction, validateAction } from './ai/runtime.js'
 import { applyFormat } from './ai/format.js'
+import VirtualGrid from './grid/VirtualGrid.jsx'
 
-const TOTAL_ROWS = 50
-const TOTAL_COLS = 50
+const TOTAL_ROWS = 100000
+const TOTAL_COLS = 200
 
 export default function App() {
   // Engine instance is created once and reused across renders
   // Note: The engine maintains its own internal state, so React state is only used for UI updates
   const [engine] = useState(() => createEngine(TOTAL_ROWS, TOTAL_COLS))
-  const [, setVersion] = useState(0)
+  const [version, setVersion] = useState(0)
   const [selectedCell, setSelectedCell] = useState(null)
   const [selection, setSelection] = useState(null)
   const [dragMode, setDragMode] = useState(null)
@@ -28,12 +29,11 @@ export default function App() {
   const [aiError, setAiError] = useState('')
   const [showPlan, setShowPlan] = useState(true)
   const [filters, setFilters] = useState({})
-  const [filterOpen, setFilterOpen] = useState(null)
   const [sortState, setSortState] = useState({})
+  const [nameBox, setNameBox] = useState('')
 
   const forceRerender = useCallback(() => setVersion(v => v + 1), [])
   const rowVisible = useCallback((row) => Object.entries(filters).every(([col, filter]) => { const value=String(engine.getCell(row, Number(col)).computed ?? '').trim(), normalized=value.toLowerCase(), selected=!filter.values?.length || filter.values.some(item => item.toLowerCase() === normalized); let condition=true; if (filter.op === 'empty') condition=!value; else if (filter.op === 'contains') condition=normalized.includes((filter.value || '').trim().toLowerCase()); else if (filter.op === 'gt') condition=Number(value.replace(/[$,%\s]/g, '')) > Number(filter.value); else if (filter.op === 'lt') condition=Number(value.replace(/[$,%\s]/g, '')) < Number(filter.value); return selected && condition }), [filters, engine])
-  const filterValues = useCallback(col => Array.from(new Set(Array.from({ length: engine.getUsedRange().r2 }, (_, i) => String(engine.getCell(i + 1, col).computed ?? '').trim()))).sort(), [engine])
   const sortColumn = useCallback((col) => { const prior=sortState[col] || 'original'; const next=prior === 'original' ? 'asc' : prior === 'asc' ? 'desc' : 'original'; if (next === 'original') { engine.undo(); forceRerender() } else { const visible=Array.from({length: engine.rows-2},(_,i)=>i+1).filter(rowVisible); engine.sortRange({r1:0,c1:0,r2:engine.rows-1,c2:engine.cols-1}, col, next, visible); forceRerender() }; setSortState({[col]:next}) }, [sortState, engine, forceRerender, rowVisible])
 
   useEffect(() => {
@@ -41,6 +41,10 @@ export default function App() {
       if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === 'k') { event.preventDefault(); setAiOpen(open => !open); return }
       if (!selectedCell || editingCell) return
       if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === 'a') { event.preventDefault(); setSelection({ r1: 0, c1: 0, r2: engine.rows - 1, c2: engine.cols - 1 }); return }
+      if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === 'd' && selection) { event.preventDefault(); engine.fillRange({r1:selection.r1,c1:selection.c1,r2:selection.r1,c2:selection.c2},selection); forceRerender(); return }
+      if (event.ctrlKey && event.key === 'Home') { event.preventDefault(); setSelectedCell({r:0,c:0});setSelection({r1:0,c1:0,r2:0,c2:0});return }
+      if (event.ctrlKey && event.key === 'End') { event.preventDefault(); const used=engine.getUsedRange();setSelectedCell({r:used.r2,c:used.c2});setSelection({r1:used.r2,c1:used.c2,r2:used.r2,c2:used.c2});return }
+      if (event.key === 'PageDown' || event.key === 'PageUp') { event.preventDefault(); const r=Math.max(0,Math.min(engine.rows-1,selectedCell.r+(event.key==='PageDown'?20:-20)));setSelectedCell({r,c:selectedCell.c});setSelection({r1:r,c1:selectedCell.c,r2:r,c2:selectedCell.c});return }
       if (event.key === 'Delete' || event.key === 'Backspace') { event.preventDefault(); if (selection) { engine.clearRange(selection); forceRerender() }; return }
       const shifts = { ArrowDown:[1,0], ArrowUp:[-1,0], ArrowLeft:[0,-1], ArrowRight:[0,1] }
       if (event.shiftKey && shifts[event.key]) { event.preventDefault(); const [dr,dc]=shifts[event.key]; const anchor=selection||{r1:selectedCell.r,c1:selectedCell.c}; setSelection({ r1:anchor.r1,c1:anchor.c1,r2:Math.max(0,Math.min(engine.rows-1,selectedCell.r+dr)),c2:Math.max(0,Math.min(engine.cols-1,selectedCell.c+dc)) }) }
@@ -117,8 +121,6 @@ export default function App() {
   }, [selection])
   const extendDrag = useCallback((row, col) => { if (dragMode === 'select') { setSelection(s => s && ({ ...s, r2: row, c2: col })); setSelectedCell({ r: row, c: col }) } }, [dragMode])
   useEffect(() => { const stop = () => setDragMode(null); window.addEventListener('mouseup', stop); return () => window.removeEventListener('mouseup', stop) }, [])
-  const finishFill = useCallback((event) => { event.preventDefault(); event.stopPropagation(); if (!selection) return; setDragMode('fill') }, [selection])
-  const fillTo = useCallback((row, col) => { if (dragMode !== 'fill' || !selection) return; const target={ r1: selection.r1, c1: selection.c1, r2: row, c2: col }; engine.fillRange(selection, target); forceRerender(); setSelection(target); setDragMode(null) }, [dragMode, selection, engine, forceRerender])
 
   // ────── Keyboard navigation ──────
 
@@ -175,6 +177,8 @@ export default function App() {
     if (!editingCell && selectedCell) setEditingCell(selectedCell)
     setEditValue(value)
   }, [editingCell, selectedCell])
+
+  const jumpToName = useCallback(() => { const point=text=>{const match=text.match(/^([A-Z]+)(\d+)$/);if(!match)return null;let col=0;for(const char of match[1])col=col*26+char.charCodeAt(0)-64;return {r:Math.max(0,Number(match[2])-1),c:col-1}}; const [from,to]=nameBox.trim().toUpperCase().split(':').map(point); if(!from||!to||to.r>=engine.rows||to.c>=engine.cols)return;setSelectedCell(to);setSelection({r1:from.r,c1:from.c,r2:to.r,c2:to.c}) }, [nameBox, engine])
 
   // ────── Undo / Redo ──────
 
@@ -401,7 +405,7 @@ export default function App() {
 
         {/* ── Formula Bar ── */}
         <div className="formula-bar">
-          <span className="formula-bar-label">{selectedCellLabel}</span>
+          <input className="formula-bar-label name-box" value={nameBox || selectedCellLabel} onChange={e => setNameBox(e.target.value)} onKeyDown={e => { if(e.key==='Enter')jumpToName() }} />
           <input
             className="formula-bar-input"
             value={formulaBarValue}
@@ -413,85 +417,10 @@ export default function App() {
         </div>
 
         {/* ── Grid ── */}
-        <div className="grid-scroll">
-          <table className="grid-table">
-            <thead>
-              <tr>
-                <th className="col-header-blank"></th>
-                {Array.from({ length: engine.cols }, (_, colIndex) => (
-                  <th key={colIndex} className="col-header" onMouseDown={() => { setSelection({ r1: 0, r2: engine.rows - 1, c1: colIndex, c2: colIndex }); setSelectedCell({ r: 0, c: colIndex }) }}>
-                    <span onClick={(e) => { e.stopPropagation(); sortColumn(colIndex) }}>{getColumnLabel(colIndex)}</span><button className="filter-button" onClick={(e) => { e.stopPropagation(); setFilterOpen(filterOpen === colIndex ? null : colIndex) }}>⌄</button>
-                    {filterOpen === colIndex && <div className="filter-menu" onMouseDown={e => e.stopPropagation()}><input placeholder="search values" value={filters[colIndex]?.search || ''} onChange={e => setFilters(f => ({...f,[colIndex]:{...(f[colIndex]||{}),search:e.target.value}}))}/><select value={filters[colIndex]?.op || 'contains'} onChange={e => setFilters(f => ({...f,[colIndex]:{...(f[colIndex]||{}),op:e.target.value}}))}><option value="contains">contains</option><option value="gt">greater than</option><option value="lt">less than</option><option value="empty">is empty</option></select>{filters[colIndex]?.op !== 'empty' && <input placeholder="condition value" value={filters[colIndex]?.value || ''} onChange={e => setFilters(f => ({...f,[colIndex]:{...(f[colIndex]||{}),value:e.target.value}}))}/>}<label><input type="checkbox" checked={(filters[colIndex]?.values || []).includes('')} onChange={e => setFilters(f => ({...f,[colIndex]:{...(f[colIndex]||{}),values:e.target.checked?[...(f[colIndex]?.values||[]),'']:(f[colIndex]?.values||[]).filter(v=>v)}}))}/>(Blanks)</label>{filterValues(colIndex).filter(v => !filters[colIndex]?.search || v.toLowerCase().includes(filters[colIndex].search.toLowerCase())).slice(0,100).map(value => <label key={value}><input type="checkbox" checked={(filters[colIndex]?.values || []).includes(value)} onChange={e => setFilters(f => { const selected=f[colIndex]?.values||[]; return {...f,[colIndex]:{...(f[colIndex]||{}),values:e.target.checked?[...selected,value]:selected.filter(v=>v!==value)}} })}/>{value || '(Blanks)'}</label>)}<button onClick={() => setFilters(f => { const n={...f}; delete n[colIndex]; return n })}>Clear</button></div>}
-                  </th>
-                ))}
-              </tr>
-            </thead>
-            <tbody>
-              {Array.from({ length: engine.rows }, (_, rowIndex) => (
-                <tr key={rowIndex} style={rowIndex > 0 && !rowVisible(rowIndex) ? { display: 'none' } : undefined}>
-                  <td className="row-header" onMouseDown={() => { setSelection({ r1: rowIndex, r2: rowIndex, c1: 0, c2: engine.cols - 1 }); setSelectedCell({ r: rowIndex, c: 0 }) }}>{rowIndex + 1}</td>
-                  {Array.from({ length: engine.cols }, (_, colIndex) => {
-                    const isSelected = selection && rowIndex >= Math.min(selection.r1, selection.r2) && rowIndex <= Math.max(selection.r1, selection.r2) && colIndex >= Math.min(selection.c1, selection.c2) && colIndex <= Math.max(selection.c1, selection.c2)
-                    const isEditing = editingCell?.r === rowIndex && editingCell?.c === colIndex
-                    const cellData = engine.getCell(rowIndex, colIndex)
-                    const style = engine.getCellStyle(rowIndex, colIndex) || {}
-                    const displayValue = cellData.error
-                      ? cellData.error
-                      : (cellData.computed !== null && cellData.computed !== '' ? String(cellData.computed) : cellData.raw)
-
-                    return (
-                      <td
-                        key={colIndex}
-                        className={`cell ${isSelected ? 'selected' : ''}`}
-                        style={{ background: style.bg || 'white' }}
-                        onMouseDown={(e) => beginCellDrag(e, rowIndex, colIndex)}
-                        onMouseEnter={() => { extendDrag(rowIndex, colIndex); fillTo(rowIndex, colIndex) }}
-                        onDoubleClick={() => startEditing(rowIndex, colIndex)}
-                      >
-                        {isEditing ? (
-                          <input
-                            autoFocus
-                            className="cell-input"
-                            value={editValue}
-                            onChange={(e) => setEditValue(e.target.value)}
-                            onBlur={() => commitEdit(rowIndex, colIndex)}
-                            onKeyDown={(e) => handleKeyDown(e, rowIndex, colIndex)}
-                            ref={isSelected ? cellInputRef : undefined}
-                            style={{
-                              fontWeight: style.bold ? 'bold' : 'normal',
-                              fontStyle: style.italic ? 'italic' : 'normal',
-                              textDecoration: style.underline ? 'underline' : 'none',
-                              color: style.color || '#202124',
-                              fontSize: (style.fontSize || 13) + 'px',
-                              textAlign: style.align || 'left',
-                              background: style.bg || 'white',
-                            }}
-                          />
-                        ) : (
-                          <div
-                            className={`cell-display align-${style.align || 'left'} ${cellData.error ? 'error' : ''}`}
-                            style={{
-                              fontWeight: style.bold ? 'bold' : 'normal',
-                              fontStyle: style.italic ? 'italic' : 'normal',
-                              textDecoration: style.underline ? 'underline' : 'none',
-                              color: cellData.error ? '#d93025' : (style.color || '#202124'),
-                              fontSize: (style.fontSize || 13) + 'px',
-                            }}
-                          >
-                            {displayValue}{isSelected && rowIndex === Math.max(selection.r1, selection.r2) && colIndex === Math.max(selection.c1, selection.c2) && <span className="fill-handle" onMouseDown={finishFill} />}
-                          </div>
-                        )}
-                      </td>
-                    )
-                  })}
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
+        <VirtualGrid engine={engine} version={version} selection={selection} editingCell={editingCell} editValue={editValue} onEdit={startEditing} onChangeEdit={setEditValue} onCommit={commitEdit} onSelect={beginCellDrag} onExtend={extendDrag} onHeaderSort={sortColumn} rowVisible={rowVisible} />
 
         <p className="footer-hint">
-          Click a cell to edit · Enter/Tab/Arrow keys to navigate · Formulas: =A1+B1 · =SUM(A1:A5) · =AVG(A1:A5) · =MAX(A1:A5) · =MIN(A1:A5)
+          Virtualized 100,000 × 200 · Name box jumps to AZ5000 · select K2:K100000 and press Ctrl+D to fill down
         </p>
         {Object.keys(filters).length > 0 && <p className="footer-hint">{Array.from({ length: Math.max(0, engine.getUsedRange().r2 - 1) }, (_, i) => i + 1).filter(rowVisible).length} of {Math.max(0, engine.getUsedRange().r2 - 1)} rows <button onClick={() => setFilters({})}>Clear all filters</button></p>}
       </div>

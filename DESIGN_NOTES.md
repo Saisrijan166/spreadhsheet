@@ -10,6 +10,7 @@
 - `fillRange(source, target)`: fills a rectangle in one undo entry; shifts relative formula references and preserves absolute markers.
 - `clearRange(range)`: clears a rectangle in one undo entry.
 - `sortRange(range, column, direction, visibleRows)`: stable physical row sort in one undo entry.
+- `getColumnWidth`, `getRowHeight`, `setColumnWidth`, `setRowHeight`, `autoFitColumn`: engine-owned dimensions that shift with structure and use shared history.
 - `src/ai/runtime.js` is pure parsing, validation, coercion and query execution over a matrix.
 - `src/ai/format.js` is a pure style-plan applier; styles are currently held by the UI.
 
@@ -28,6 +29,7 @@
 - `npm test`, `npm run lint`, and `npm run build` pass on this checkout.
 - `node scripts/verify.mjs` passes all 20 query golden plans against `sales-large.tsv` for columns and displayed row count. It does not yet verify every expected row/value or format golden case.
 - No browser performance measurements were made; no numbers are reported.
+- The main grid is a virtual 100,000 × 200 surface. Prefix sums plus binary search select visible rows/columns with overscan; its sparse engine map means empty cells are not allocated. To fill K2 to K100000, enter the seed in K2, name-box-select `K2:K100000` (or extend selection), then press Ctrl+D.
 
 ## Gaps / next work
 

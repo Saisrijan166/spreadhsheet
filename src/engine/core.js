@@ -1004,6 +1004,9 @@ export function createEngine(initialRows = 50, initialCols = 50) {
         return 'APPLIED'
     }
     function setCellStyle(row, col, patch) { const next = formatState(), key = styleKey(row, col); next.styles[key] = { ...(next.styles[key] || {}), ...patch }; return applyFormatState(next) }
+    function setColumnWidth(col, width) { const next=formatState(); next.widths[col]=Math.max(30, Math.min(600, width)); return applyFormatState(next) }
+    function setRowHeight(row, height) { const next=formatState(); next.rowHeights[row]=Math.max(18, Math.min(200, height)); return applyFormatState(next) }
+    function autoFitColumn(col) { let width = 60; for (const [key, cell] of cells) { const point=cellCoords(key); if (point.col === col) width=Math.max(width, Math.min(600, String(cell.raw).length * 8 + 18)) } return setColumnWidth(col,width) }
 
     // ── Public API ──
     // The engine exposes a limited API to prevent direct access to internal state
@@ -1019,6 +1022,11 @@ export function createEngine(initialRows = 50, initialCols = 50) {
         getUsedRange: usedRange,
         applyFormatState,
         setCellStyle,
+        getColumnWidth: col => columnWidths.get(col) || 120,
+        getRowHeight: row => rowHeights.get(row) || 24,
+        setColumnWidth,
+        setRowHeight,
+        autoFitColumn,
         setCell: executeSetCell,
         fillRange: executeFill,
         clearRange: executeClearRange,
