@@ -1,3 +1,0 @@
-export function prefixSums(count, sizeAt) { const sums = new Array(count + 1).fill(0); for (let i = 0; i < count; i++) sums[i + 1] = sums[i] + sizeAt(i); return sums }
-export function indexAtOffset(sums, offset) { let lo = 0, hi = sums.length - 1; while (lo < hi) { const mid = Math.ceil((lo + hi) / 2); if (sums[mid] <= offset) lo = mid; else hi = mid - 1 } return Math.max(0, Math.min(sums.length - 2, lo)) }
-export function visibleWindow(sums, offset, viewport, overscan = 2) { const start = Math.max(0, indexAtOffset(sums, offset) - overscan); const end = Math.min(sums.length - 2, indexAtOffset(sums, offset + viewport) + overscan); return { start, end, offset: sums[start], size: sums.at(-1) } }
