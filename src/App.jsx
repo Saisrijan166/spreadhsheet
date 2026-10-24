@@ -1,7 +1,9 @@
-import { useState, useRef, useCallback, useMemo } from 'react'
+import { useState, useRef, useCallback, useEffect, useMemo } from 'react'
 import './App.css'
 import { createEngine } from './engine/core.js'
 import { loadSampleSmall, loadSampleLarge } from './fixtures/loadSample.js'
+import { createProvider } from './ai/provider.js'
+import { executeQuery, parseAction, validateAction } from './ai/runtime.js'
 
 const TOTAL_ROWS = 50
 const TOTAL_COLS = 50
@@ -18,8 +20,35 @@ export default function App() {
   // Format: { "row,col": { bold: bool, italic: bool, ... } }
   const [cellStyles, setCellStyles] = useState({})
   const cellInputRef = useRef(null)
+  const [aiOpen, setAiOpen] = useState(false)
+  const [aiPrompt, setAiPrompt] = useState('')
+  const [aiResult, setAiResult] = useState(null)
+  const [aiError, setAiError] = useState('')
+  const [showPlan, setShowPlan] = useState(true)
 
   const forceRerender = useCallback(() => setVersion(v => v + 1), [])
+
+  useEffect(() => {
+    const onKey = event => { if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === 'k') { event.preventDefault(); setAiOpen(open => !open) } }
+    window.addEventListener('keydown', onKey); return () => window.removeEventListener('keydown', onKey)
+  }, [])
+
+  const askAi = useCallback(async () => {
+    if (!aiPrompt.trim()) return
+    setAiError(''); setAiResult(null)
+    const values = Array.from({ length: engine.rows }, (_, r) => Array.from({ length: engine.cols }, (_, c) => engine.getCell(r, c).computed ?? ''))
+    const headers = values[0].filter((v, i) => v !== '' || values.some(row => row[i] !== ''))
+    const context = { range: `A1:${getColumnLabel(Math.max(0, headers.length - 1))}${engine.rows}`, rowCount: Math.max(0, values.length - 1), columns: headers.map((name, index) => ({ name, index, type: 'text', examples: values.slice(1, 3).map(row => String(row[index] ?? '')) })), sampleRows: values.slice(1, 6).map(row => row.slice(0, headers.length)), selection: selectedCell ? `${getColumnLabel(selectedCell.c)}${selectedCell.r + 1}` : null }
+    try {
+      const provider = createProvider()
+      const response = await provider.complete({ system: 'Translate the request into one permitted spreadsheet action. Respond with JSON only.', user: `${aiPrompt}\n\nContext: ${JSON.stringify(context)}` })
+      const parsed = parseAction(response.text); if (parsed.error) throw new Error(`${parsed.error}: ${parsed.detail}`)
+      const checked = validateAction(parsed.action); if (checked.error) throw new Error(`${checked.error}: ${checked.detail}`)
+      if (checked.action.type === 'query') setAiResult({ action: checked.action, result: executeQuery(values.map(row => row.slice(0, headers.length)), checked.action) })
+      else if (checked.action.type === 'clarify') setAiResult({ action: checked.action, result: { question: checked.action.question } })
+      else setAiResult({ action: checked.action, result: { message: 'Format plan ready; apply controls are not yet available.' } })
+    } catch (error) { setAiError(error.message || 'PROVIDER_ERROR') }
+  }, [aiPrompt, engine, getColumnLabel, selectedCell])
 
   // ────── Cell style helpers ──────
 
@@ -441,6 +470,13 @@ export default function App() {
           Click a cell to edit · Enter/Tab/Arrow keys to navigate · Formulas: =A1+B1 · =SUM(A1:A5) · =AVG(A1:A5) · =MAX(A1:A5) · =MIN(A1:A5)
         </p>
       </div>
+      {aiOpen && <aside className="ai-panel">
+        <div className="ai-panel-head"><strong>Ask your data</strong><button onClick={() => setAiOpen(false)}>×</button></div>
+        <textarea value={aiPrompt} onChange={e => setAiPrompt(e.target.value)} placeholder="Ask about this sheet" />
+        <div><button className="toolbar-btn" onClick={askAi}>Run</button><label><input type="checkbox" checked={showPlan} onChange={e => setShowPlan(e.target.checked)} /> Show plan</label></div>
+        {aiError && <p className="ai-error">{aiError}</p>}
+        {aiResult && <div className="ai-result">{showPlan && <pre>{JSON.stringify(aiResult.action, null, 2)}</pre>}{aiResult.result.question && <p>{aiResult.result.question}</p>}{aiResult.result.error && <p className="ai-error">{aiResult.result.detail}</p>}{aiResult.result.columns && <><p>{aiResult.result.rowCount} rows{aiResult.result.truncated ? ' (truncated)' : ''}</p><table><thead><tr>{aiResult.result.columns.map(c => <th key={c}>{c}</th>)}</tr></thead><tbody>{aiResult.result.rows.map((row, i) => <tr key={i}>{row.map((v, j) => <td key={j}>{String(v ?? '')}</td>)}</tr>)}</tbody></table></>}</div>}
+      </aside>}
     </div>
   )
 }
