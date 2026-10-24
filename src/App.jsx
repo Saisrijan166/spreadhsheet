@@ -29,8 +29,13 @@ export default function App() {
   const [aiError, setAiError] = useState('')
   const [showPlan, setShowPlan] = useState(true)
   const [formatState, setFormatState] = useState({ styles: {}, widths: {}, freezeRows: 0 })
+  const [filters, setFilters] = useState({})
+  const [filterOpen, setFilterOpen] = useState(null)
+  const [sortState, setSortState] = useState({})
 
   const forceRerender = useCallback(() => setVersion(v => v + 1), [])
+  const rowVisible = useCallback((row) => Object.entries(filters).every(([col, filter]) => { const value=String(engine.getCell(row, Number(col)).computed ?? '').trim(); if (filter.op === 'empty') return !value; if (filter.op === 'contains') return value.toLowerCase().includes((filter.value || '').toLowerCase()); if (filter.op === 'gt') return Number(value.replace(/[$,%\s]/g, '')) > Number(filter.value); if (filter.op === 'lt') return Number(value.replace(/[$,%\s]/g, '')) < Number(filter.value); return !filter.values?.length || filter.values.includes(value) }), [filters, engine])
+  const sortColumn = useCallback((col) => { const prior=sortState[col] || 'original'; const next=prior === 'original' ? 'asc' : prior === 'asc' ? 'desc' : 'original'; if (next === 'original') { engine.undo(); forceRerender() } else { const visible=Array.from({length: engine.rows-2},(_,i)=>i+1).filter(rowVisible); engine.sortRange({r1:0,c1:0,r2:engine.rows-1,c2:engine.cols-1}, col, next, visible); forceRerender() }; setSortState({[col]:next}) }, [sortState, engine, forceRerender, rowVisible])
 
   useEffect(() => {
     const onKey = event => {
@@ -421,14 +426,15 @@ export default function App() {
                 <th className="col-header-blank"></th>
                 {Array.from({ length: engine.cols }, (_, colIndex) => (
                   <th key={colIndex} className="col-header" onMouseDown={() => { setSelection({ r1: 0, r2: engine.rows - 1, c1: colIndex, c2: colIndex }); setSelectedCell({ r: 0, c: colIndex }) }}>
-                    {getColumnLabel(colIndex)}
+                    <span onClick={(e) => { e.stopPropagation(); sortColumn(colIndex) }}>{getColumnLabel(colIndex)}</span><button className="filter-button" onClick={(e) => { e.stopPropagation(); setFilterOpen(filterOpen === colIndex ? null : colIndex) }}>⌄</button>
+                    {filterOpen === colIndex && <div className="filter-menu" onMouseDown={e => e.stopPropagation()}><input placeholder="search / value" value={filters[colIndex]?.value || ''} onChange={e => setFilters(f => ({...f,[colIndex]:{...(f[colIndex]||{}),value:e.target.value,op:(f[colIndex]?.op||'contains')}}))}/><select value={filters[colIndex]?.op || 'contains'} onChange={e => setFilters(f => ({...f,[colIndex]:{...(f[colIndex]||{}),op:e.target.value}}))}><option value="contains">contains</option><option value="gt">greater than</option><option value="lt">less than</option><option value="empty">is empty</option></select><button onClick={() => setFilters(f => { const n={...f}; delete n[colIndex]; return n })}>Clear</button></div>}
                   </th>
                 ))}
               </tr>
             </thead>
             <tbody>
               {Array.from({ length: engine.rows }, (_, rowIndex) => (
-                <tr key={rowIndex}>
+                <tr key={rowIndex} style={rowIndex > 0 && !rowVisible(rowIndex) ? { display: 'none' } : undefined}>
                   <td className="row-header" onMouseDown={() => { setSelection({ r1: rowIndex, r2: rowIndex, c1: 0, c2: engine.cols - 1 }); setSelectedCell({ r: rowIndex, c: 0 }) }}>{rowIndex + 1}</td>
                   {Array.from({ length: engine.cols }, (_, colIndex) => {
                     const isSelected = selection && rowIndex >= Math.min(selection.r1, selection.r2) && rowIndex <= Math.max(selection.r1, selection.r2) && colIndex >= Math.min(selection.c1, selection.c2) && colIndex <= Math.max(selection.c1, selection.c2)
@@ -493,6 +499,7 @@ export default function App() {
         <p className="footer-hint">
           Click a cell to edit · Enter/Tab/Arrow keys to navigate · Formulas: =A1+B1 · =SUM(A1:A5) · =AVG(A1:A5) · =MAX(A1:A5) · =MIN(A1:A5)
         </p>
+        {Object.keys(filters).length > 0 && <p className="footer-hint">{Array.from({ length: engine.rows - 1 }, (_, i) => i + 1).filter(rowVisible).length} of {engine.rows - 1} rows <button onClick={() => setFilters({})}>Clear all filters</button></p>}
       </div>
       {aiOpen && <aside className="ai-panel">
         <div className="ai-panel-head"><strong>Ask your data</strong><button onClick={() => setAiOpen(false)}>×</button></div>

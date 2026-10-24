@@ -304,6 +304,9 @@ body {
 .col-header:hover {
   background: #f1f3f4;
 }
+.filter-button { margin-left: 4px; border: 0; background: transparent; cursor: pointer; }
+.filter-menu { position: absolute; top: 100%; left: 0; z-index: 30; width: 170px; padding: 8px; background: #fff; border: 1px solid #dadce0; box-shadow: 0 2px 8px #0003; }
+.filter-menu input, .filter-menu select { width: 100%; margin-bottom: 6px; }
 
 /* Row header */
 .row-header {
