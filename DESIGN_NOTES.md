@@ -1,40 +1,40 @@
 # Design notes
 
-Fill this in as you work. Keep it factual and short; bullet points are fine. Graders read this before your code.
+## Assumptions
 
-## Challenges
+- HTTP credentials stay in ignored `.env.local`; browser HTTP mode is development-only because browser keys are observable.
 
-- Challenge N — notes
+## Data model and API
 
-## Data model changes
+- The sheet remains a sparse `Map` keyed by A1 coordinates; formulas use its dependency graph.
+- `fillRange(source, target)`: fills a rectangle in one undo entry; shifts relative formula references and preserves absolute markers.
+- `clearRange(range)`: clears a rectangle in one undo entry.
+- `sortRange(range, column, direction, visibleRows)`: stable physical row sort in one undo entry.
+- `src/ai/runtime.js` is pure parsing, validation, coercion and query execution over a matrix.
+- `src/ai/format.js` is a pure style-plan applier; styles are currently held by the UI.
 
-What you added to or changed in the engine's state, and why. (Row identity? style store? number formats? rules?)
+## Undo
 
-## Engine API
+- Fill, clear range and sort store one pre-operation snapshot.
+- Existing cell and structural undo are unchanged. AI format application does not yet participate in engine undo; this is incomplete.
 
-Every method you added to the object returned by `createEngine`, one line each: signature, what it does, what one undo reverts.
+## AI
 
-## Undo semantics
+- `createProvider` selects `VITE_AI_PROVIDER=mock|http` (mock by default). The HTTP provider uses OpenAI-compatible chat completions, Bearer auth, JSON mode with one fallback without it, and classifies auth, rate-limit, network and server errors.
+- Context contains range, row count, column name/index/type/examples, at most five sample rows and selection; it never sends the full sheet.
+- `parseAction` extracts the first balanced JSON object through prose/fences; `validateAction` rejects invalid shape before query or formatting.
 
-For each user action you added: what a single `Ctrl+Z` reverts.
+## Verification and measurements
 
-## Defects found in the existing code
+- `npm test`, `npm run lint`, and `npm run build` pass on this checkout.
+- `node scripts/verify.mjs` passes all 20 query golden plans against `sales-large.tsv` for columns and displayed row count. It does not yet verify every expected row/value or format golden case.
+- No browser performance measurements were made; no numbers are reported.
 
-For each: where, symptom, root cause (two or three sentences), fix.
+## Gaps / next work
 
-## Measurements
-
-What you measured, how (production build? which machine? how many runs?), the numbers.
-
-## AI (if applicable)
-
-- Provider you wired up and why.
-- Exact context shape sent to the model.
-- How you parse and validate responses; what happens on each failure.
-- Anything the golden set disagrees with your implementation on, and why you chose your behaviour.
-
-## Trade-offs and what you would do next
+- The UI still lacks complete multi-range selection, fill-handle drag, filter controls, format undo, and a mounted virtualized 100k-row grid. `src/grid/virtual.js` supplies prefix-sum/binary-search primitives but is not wired into the table.
+- Extend verification to full golden result values and formatting assertions, then add headless-browser measurements.
 
 ## Use of AI tools
 
-Which tools you used and for what. Nothing here counts against you; we just want to know.
+- Codex was used to inspect the starter and implement the changes.
