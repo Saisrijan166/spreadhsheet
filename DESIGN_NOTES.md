@@ -32,7 +32,7 @@
 
 ## Gaps / next work
 
-- The UI still lacks complete multi-range selection, fill-handle drag, filter controls, format undo, and a mounted virtualized 100k-row grid. `src/grid/virtual.js` supplies prefix-sum/binary-search primitives but is not wired into the table.
+- Range selection/fill UI and basic header filtering/sorting are now present. Format undo and a mounted virtualized 100k-row grid remain incomplete; `src/grid/virtual.js` supplies prefix-sum/binary-search primitives but is not wired into the table.
 - Extend verification to full golden result values and formatting assertions, then add headless-browser measurements.
 
 ## Use of AI tools
